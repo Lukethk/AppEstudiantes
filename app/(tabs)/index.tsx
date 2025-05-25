@@ -1,10 +1,13 @@
-import Icon from '@expo/vector-icons/MaterialCommunityIcons';
+import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Animated,
+  ActivityIndicator,
+  Alert,
   Dimensions,
-  Image,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,187 +16,205 @@ import {
 import { useTheme } from '../../context/ThemeContext';
 
 const { height } = Dimensions.get('window');
-const NAVBAR_HEIGHT = 100;
-const EXPANDED_HEIGHT = height * 1.1;
+
+interface Solicitud {
+  id_solicitud: number;
+  materia_nombre: string;
+  estado: string;
+  fecha_hora_inicio: string;
+  fecha_hora_fin?: string;
+}
 
 export default function HomeScreen() {
   const [filtro, setFiltro] = useState('pendiente');
-  const { isDark, toggleTheme } = useTheme();
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [animation] = useState(new Animated.Value(0));
+  const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const { isDark } = useTheme();
 
-  const toggleNavbar = () => {
-    const toValue = isExpanded ? 0 : 1;
-    setIsExpanded(!isExpanded);
-    Animated.spring(animation, {
-      toValue,
-      useNativeDriver: false,
-      tension: 40,
-      friction: 7
-    }).start();
+  const fetchSolicitudes = async () => {
+    try {
+      const userData = await AsyncStorage.getItem('userData');
+      const user = userData ? JSON.parse(userData) : null;
+  
+      if (!user || !user.id_estudiante) {
+        throw new Error('Usuario no identificado');
+      }
+  
+      const response = await fetch(`https://universidad-la9h.onrender.com/estudiantes/solicitudes?id_estudiante=${user.id_estudiante}`, {
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+  
+      if (!response.ok) {
+        throw new Error('Error al cargar las solicitudes');
+      }
+  
+      const data = await response.json();
+      setSolicitudes(data);
+    } catch (error) {
+      Alert.alert('Error', 'No se pudieron cargar las solicitudes');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+  
+
+  useEffect(() => {
+    fetchSolicitudes();
+  }, []);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchSolicitudes();
   };
 
-  // Datos de ejemplo
-  const solicitudes = [
-    {
-      id_solicitud: 1,
-      practica_titulo: 'Práctica de Biología',
-      estado: 'pendiente',
-      numero_estudiantes: 25,
-      laboratorio_nombre: 'Lab. Biología',
-      fecha_solicitud: new Date().toISOString()
-    },
-    {
-      id_solicitud: 2,
-      practica_titulo: 'Práctica de Química',
-      estado: 'aprobada',
-      numero_estudiantes: 18,
-      laboratorio_nombre: 'Lab. Química',
-      fecha_solicitud: new Date().toISOString()
-    },
-  ];
+  const handleNuevaSolicitud = () => {
+    router.push('/nueva-solicitud');
+  };
 
-  const handleLogout = () => {
-    router.replace('/login');
+  const handleLogout = async () => {
+    Alert.alert(
+      'Cerrar Sesión',
+      '¿Estás seguro que deseas cerrar sesión?',
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel'
+        },
+        {
+          text: 'Cerrar Sesión',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem('userData');
+              router.replace('/login');
+            } catch (error) {
+              Alert.alert('Error', 'No se pudo cerrar sesión correctamente');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getEstadoColor = (estado: string) => {
+    switch (estado.toLowerCase()) {
+      case 'pendiente':
+        return '#f5a623';
+      case 'aprobada':
+        return '#4caf50';
+      case 'rechazada':
+        return '#e53935';
+      default:
+        return '#ccc';
+    }
   };
 
   const solicitudesFiltradas = solicitudes.filter(s => s.estado.toLowerCase() === filtro.toLowerCase());
 
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#592644" />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
-      <View style={styles.content}>
-        <View style={styles.developmentContainer}>
-          <Icon name="code-braces" size={60} color="#592644" />
-          <Text style={[styles.developmentTitle, isDark && styles.developmentTitleDark]}>
-            Aplicación en Desarrollo
-          </Text>
-          <Text style={[styles.developmentText, isDark && styles.developmentTextDark]}>
-            Estamos trabajando para brindarte la mejor experiencia
-          </Text>
-        </View>
-      </View>
-
-      <View style={[styles.header, { zIndex: 1000 }]}>
-        <TouchableOpacity 
-          activeOpacity={0.9}
-          onPress={toggleNavbar}
-          style={styles.navbarTouchable}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Mis Solicitudes</Text>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
         >
-          <Animated.View style={[
-            styles.navbar,
-            {
-              height: animation.interpolate({
-                inputRange: [0, 1],
-                outputRange: [NAVBAR_HEIGHT, EXPANDED_HEIGHT]
-              })
-            }
-          ]}>
-            <View style={styles.navbarTop}>
-              <Animated.View style={[
-                styles.logoContainer,
-                {
-                  opacity: animation.interpolate({
-                    inputRange: [0, 0.5, 1],
-                    outputRange: [0, 0.5, 1]
-                  }),
-                  transform: [{
-                    translateY: animation.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-20, 0]
-                    })
-                  }]
-                }
-              ]}>
-                <Image 
-                  source={require('../../assets/images/logo-2.png')}
-                  style={styles.logo}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-              <Animated.View style={[
-                styles.arrowContainer,
-                {
-                  opacity: animation.interpolate({
-                    inputRange: [0, 0.5, 1],
-                    outputRange: [1, 0.5, 0]
-                  }),
-                  transform: [{
-                    translateY: animation.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, -20]
-                    })
-                  }]
-                }
-              ]}>
-                <Icon 
-                  name="chevron-down" 
-                  size={30} 
-                  color="#fff" 
-                />
-              </Animated.View>
-            </View>
-
-            <Animated.View style={[
-              styles.navbarContent,
-              {
-                opacity: animation.interpolate({
-                  inputRange: [0, 0.5, 1],
-                  outputRange: [0, 0.5, 1]
-                }),
-                transform: [{
-                  translateY: animation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0]
-                  })
-                }]
-              }
-            ]}>
-              <View style={styles.navbarButtons}>
-                <TouchableOpacity 
-                  style={styles.navbarButton}
-                  onPress={() => router.push('/profile')}
-                >
-                  <Icon name="account" size={24} color="#fff" />
-                  <Text style={styles.navbarButtonText}>Perfil</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.navbarButton}
-                  onPress={toggleTheme}
-                >
-                  {isDark ? (
-                    <>
-                      <Icon name="weather-sunny" size={24} color="#fff" />
-                      <Text style={styles.navbarButtonText}>Modo Claro</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Icon name="weather-night" size={24} color="#fff" />
-                      <Text style={styles.navbarButtonText}>Modo Oscuro</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.navbarButton}
-                  onPress={handleLogout}
-                >
-                  <Icon name="logout" size={24} color="#fff" />
-                  <Text style={styles.navbarButtonText}>Salir</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.navbarFooter}>
-                <TouchableOpacity 
-                  style={styles.hideMenuButton}
-                  onPress={toggleNavbar}
-                >
-                  <Icon name="chevron-up" size={24} color="#fff" />
-                  <Text style={styles.hideMenuText}>Ocultar menú</Text>
-                </TouchableOpacity>
-              </View>
-            </Animated.View>
-          </Animated.View>
+          <MaterialIcons name="logout" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      <View style={styles.filtroContainer}>
+        {['pendiente', 'aprobada', 'rechazada'].map(estado => (
+          <TouchableOpacity 
+            key={estado} 
+            style={[
+              styles.filtroButton, 
+              filtro === estado && styles.filtroButtonActivo,
+              isDark && styles.filtroButtonDark
+            ]}
+            onPress={() => setFiltro(estado)}
+          >
+            <Text style={[
+              styles.filtroButtonText, 
+              filtro === estado && styles.filtroButtonTextActivo,
+              isDark && styles.filtroButtonTextDark
+            ]}>
+              {estado.charAt(0).toUpperCase() + estado.slice(1)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <ScrollView 
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#592644']}
+          />
+        }
+      >
+        {solicitudesFiltradas.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialIcons name="assignment" size={48} color={isDark ? '#666' : '#999'} />
+            <Text style={[styles.emptyText, isDark && styles.emptyTextDark]}>
+              No hay solicitudes {filtro}
+            </Text>
+          </View>
+        ) : (
+          solicitudesFiltradas.map(solicitud => (
+            <TouchableOpacity 
+              key={solicitud.id_solicitud}
+              style={[
+                styles.card,
+                isDark && styles.cardDark,
+                { borderLeftColor: getEstadoColor(solicitud.estado) }
+              ]}
+              onPress={() => router.push(`/solicitud/${solicitud.id_solicitud}`)}
+            >
+              <View style={styles.cardHeader}>
+                <Text style={[styles.cardTitle, isDark && styles.cardTitleDark]}>
+                  {solicitud.materia_nombre}
+                </Text>
+                <View style={[styles.badge, { backgroundColor: getEstadoColor(solicitud.estado) }]}>
+                  <Text style={styles.badgeText}>
+                    {solicitud.estado}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.cardText, isDark && styles.cardTextDark]}>
+                Fecha: {new Date(solicitud.fecha_hora_inicio).toLocaleString()}
+              </Text>
+              {solicitud.fecha_hora_fin && (
+                <Text style={[styles.cardText, isDark && styles.cardTextDark]}>
+                  Fin: {new Date(solicitud.fecha_hora_fin).toLocaleString()}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
+
+      <TouchableOpacity 
+        style={styles.nuevaSolicitudButton}
+        onPress={handleNuevaSolicitud}
+      >
+        <MaterialIcons name="add" size={24} color="#fff" style={styles.buttonIcon} />
+        <Text style={styles.buttonText}>Nueva Solicitud</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -201,157 +222,111 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff'
+    backgroundColor: '#f5f5f5',
   },
   containerDark: {
-    backgroundColor: '#1a1a1a'
-  },
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#592644',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  navbarTouchable: {
-    width: '100%',
-  },
-  navbar: {
-    width: '100%',
-    backgroundColor: '#592644',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    overflow: 'hidden',
-  },
-  navbarTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 120,
-    height: NAVBAR_HEIGHT + 40,
-    position: 'relative',
-  },
-  logoContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logo: {
-    width: 400,
-    height: 140,
-    marginTop: 5,
-  },
-  arrowContainer: {
-    position: 'absolute',
-    bottom: 50,
-    padding: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navbarContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 80,
-    justifyContent: 'space-between',
-  },
-  navbarButtons: {
-    flexDirection: 'column',
-    gap: 20,
-    marginTop: 40,
-  },
-  navbarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    backgroundColor: '#ffffff20',
-    borderRadius: 8,
-    gap: 15,
-  },
-  navbarButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '500',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: NAVBAR_HEIGHT + 30,
-    alignItems: 'center',
-  },
-  contentDark: {
     backgroundColor: '#1a1a1a',
   },
-  text: {
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  header: {
+    backgroundColor: '#592644',
+    paddingTop: 50,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  headerTitle: {
+    color: '#fff',
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#592644',
-    textAlign: 'center',
-    marginBottom: 10,
   },
-  textDark: {
-    color: '#fff',
+  logoutButton: {
+    position: 'absolute',
+    right: 20,
+    padding: 8,
   },
   filtroContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginTop: 35,
-    marginBottom: 20,
-    width: '100%',
+    padding: 15,
+    backgroundColor: '#fff',
+    marginTop: 10,
+    marginHorizontal: 10,
+    borderRadius: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   filtroButton: {
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
-    backgroundColor: '#ddd',
-    marginHorizontal: 5,
+    backgroundColor: '#f0f0f0',
   },
   filtroButtonDark: {
-    backgroundColor: '#333',
+    backgroundColor: '#2d2d2d',
   },
   filtroButtonActivo: {
     backgroundColor: '#592644',
   },
   filtroButtonText: {
-    color: '#333',
+    color: '#666',
     fontWeight: '500',
   },
   filtroButtonTextDark: {
     color: '#fff',
   },
   filtroButtonTextActivo: {
-    color: 'white',
+    color: '#fff',
   },
-  noData: {
-    textAlign: 'center',
-    color: '#999',
-    marginTop: 30,
+  scrollView: {
+    flex: 1,
+    padding: 10,
   },
-  noDataDark: {
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    marginTop: 50,
+  },
+  emptyText: {
+    marginTop: 10,
+    fontSize: 16,
     color: '#666',
+    textAlign: 'center',
+  },
+  emptyTextDark: {
+    color: '#999',
   },
   card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 15,
-    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 10,
+    borderLeftWidth: 5,
     shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 6,
+    shadowRadius: 3,
     elevation: 3,
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderLeftWidth: 6,
   },
   cardDark: {
     backgroundColor: '#2d2d2d',
-    borderColor: '#333',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -359,20 +334,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
-  badge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  badgeText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
-    textTransform: 'capitalize',
-  },
   cardTitle: {
-    fontWeight: 'bold',
     fontSize: 18,
+    fontWeight: 'bold',
     color: '#333',
     flex: 1,
     marginRight: 10,
@@ -380,77 +344,45 @@ const styles = StyleSheet.create({
   cardTitleDark: {
     color: '#fff',
   },
+  badge: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textTransform: 'capitalize',
+  },
   cardText: {
     fontSize: 14,
-    color: '#555',
-    marginBottom: 2,
+    color: '#666',
+    marginBottom: 5,
   },
   cardTextDark: {
     color: '#aaa',
   },
-  solicitudButton: {
+  nuevaSolicitudButton: {
+    backgroundColor: '#592644',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#592644',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
+    padding: 15,
+    margin: 15,
     borderRadius: 12,
-    alignSelf: 'center',
-    marginTop: 40,
-    marginBottom: 30,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
     elevation: 5,
   },
-  solicitudButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-    textAlign: 'center',
-    },
-  navbarFooter: {
-    paddingBottom: 40,
-    alignItems: 'center',
+  buttonIcon: {
+    marginRight: 8,
   },
-  hideMenuButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    gap: 8,
-  },
-  hideMenuText: {
+  buttonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '500',
-  },
-  developmentContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  developmentTitle: {
-    fontSize: 28,
     fontWeight: 'bold',
-    color: '#592644',
-    marginTop: 20,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  developmentTitleDark: {
-    color: '#fff',
-  },
-  developmentText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  developmentTextDark: {
-    color: '#aaa',
   },
 });

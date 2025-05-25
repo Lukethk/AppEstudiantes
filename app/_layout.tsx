@@ -5,7 +5,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
-import { SessionContext, User } from '../context/SessionContext';
+import { SessionProvider } from '../context/SessionContext';
 import { THEME_STORAGE_KEY, ThemeContext } from '../context/ThemeContext';
 
 export default function RootLayout() {
@@ -13,7 +13,6 @@ export default function RootLayout() {
   const [loaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
-  const [user, setUser] = useState<User | null>(null);
 
   // Cargar el tema guardado al iniciar la app
   useEffect(() => {
@@ -29,10 +28,6 @@ export default function RootLayout() {
     };
     loadTheme();
   }, []);
-
-  const handleLogin = (newUser: User) => {
-    setUser(newUser);
-  };
 
   const toggleTheme = async () => {
     try {
@@ -50,18 +45,19 @@ export default function RootLayout() {
 
   return (
     <ThemeContext.Provider value={{ isDark, toggleTheme }}>
-      <SessionContext.Provider value={{ user, login: handleLogin }}>
+      <SessionProvider>
         <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
           <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="login" />
-            <Stack.Screen name="index" />
-            <Stack.Screen name="profile" />
+            <Stack.Screen name="register" />
             <Stack.Screen name="nueva-solicitud" />
+            <Stack.Screen name="solicitud/[id]" />
             <Stack.Screen name="+not-found" />
           </Stack>
           <StatusBar style={isDark ? 'light' : 'dark'} />
         </ThemeProvider>
-      </SessionContext.Provider>
+      </SessionProvider>
     </ThemeContext.Provider>
   );
 }

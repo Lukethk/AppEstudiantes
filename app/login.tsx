@@ -1,7 +1,9 @@
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
@@ -16,7 +18,6 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { SessionContext } from '../context/SessionContext';
 import { useTheme } from '../context/ThemeContext';
 
 const { height } = Dimensions.get('window');
@@ -25,7 +26,7 @@ export default function LoginScreen() {
   const expandAnim = useRef(new Animated.Value(305)).current;
   const [correo, setCorreo] = useState('');
   const [contrasena, setContrasena] = useState('');
-  const { login } = useContext(SessionContext);
+  const [loading, setLoading] = useState(false);
   const { isDark } = useTheme();
 
   const handleLogin = async () => {
@@ -33,16 +34,94 @@ export default function LoginScreen() {
       return Alert.alert('Error', 'Por favor completa todos los campos.');
     }
 
-    const fakeUser = { nombre: 'Usuario Demo', correo };
-    login(fakeUser);
+    setLoading(true);
 
-    Animated.timing(expandAnim, {
-      toValue: height,
-      duration: 600,
-      useNativeDriver: false,
-    }).start(() => {
-      router.replace('/(tabs)');
-    });
+    try {
+      console.log('Iniciando petición de login...');
+      const response = await fetch('https://universidad-la9h.onrender.com/auth/login-estudiante', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          correo,
+          contrasena
+        })
+      });
+
+      console.log('Respuesta recibida:', response.status);
+      console.log('Headers:', response.headers);
+
+      let data;
+      try {
+        const textResponse = await response.text();
+        console.log('Respuesta texto:', textResponse);
+        
+        if (textResponse) {
+          data = JSON.parse(textResponse);
+        } else {
+          throw new Error('Respuesta vacía del servidor');
+        }
+      } catch (parseError) {
+        console.error('Error al parsear respuesta:', parseError);
+        throw new Error('Error al procesar la respuesta del servidor');
+      }
+
+      if (!response.ok) {
+        console.log('Error en respuesta:', data);
+        if (response.status === 401) {
+          throw new Error('Correo o contraseña incorrectos.');
+        }
+        throw new Error(data.message || 'Error al iniciar sesión');
+      }
+
+      // Verificamos que los datos necesarios estén presentes
+      if (!data.id_estudiante || !data.nombre || !data.correo) {
+        console.log('Datos incompletos:', data);
+        throw new Error('Datos de usuario incompletos');
+      }
+
+      console.log('Login exitoso, guardando datos...');
+      // Guardamos los datos del estudiante en AsyncStorage
+      await AsyncStorage.setItem('userData', JSON.stringify(data));
+
+      // Animación de transición
+      Animated.timing(expandAnim, {
+        toValue: height,
+        duration: 600,
+        useNativeDriver: false,
+      }).start(() => {
+        router.replace('/(tabs)');
+      });
+
+    } catch (error) {
+      console.error('Error completo en login:', error);
+      let errorMessage = 'No se pudo conectar con el servidor.';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('JSON')) {
+          errorMessage = 'Error en la respuesta del servidor';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = () => {
+    router.push('/register');
+  };
+
+  const checkAuth = async () => {
+    const encargado = await AsyncStorage.getItem('encargado');
+    if (!encargado) {
+      router.replace('/login');
+    }
   };
 
   useEffect(() => {
@@ -78,13 +157,13 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View style={styles.header}>
+        <Animated.View style={[styles.header, { height: expandAnim }]}>
           <Image 
             source={require('../assets/images/logo-2.png')}
             style={styles.logo}
             resizeMode="contain"
           />
-        </View>
+        </Animated.View>
 
         <View style={[styles.formContainer, isDark && styles.formContainerDark]}>
           <Text style={[styles.titulo, isDark && styles.tituloDark]}>Laboratorios</Text>
@@ -101,6 +180,7 @@ export default function LoginScreen() {
               value={correo}
               onChangeText={setCorreo}
               autoCapitalize="none"
+              editable={!loading}
             />
           </View>
 
@@ -113,11 +193,28 @@ export default function LoginScreen() {
               placeholderTextColor={isDark ? '#666' : '#999'}
               value={contrasena}
               onChangeText={setContrasena}
+              editable={!loading}
             />
           </View>
 
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-            <Text style={styles.loginButtonText}>INICIAR SESIÓN</Text>
+          <TouchableOpacity 
+            style={[styles.loginButton, loading && styles.loginButtonDisabled]} 
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.loginButtonText}>INICIAR SESIÓN</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.registerButton} 
+            onPress={handleRegister}
+            disabled={loading}
+          >
+            <Text style={styles.registerButtonText}>CREAR CUENTA</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -149,12 +246,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 10,
     elevation: 20,
-    paddingTop: 70,
-    paddingBottom: 50,
-    height: 350,
   },
   formContainer: {
-    marginTop: 380,
+    marginTop: 320,
     alignItems: 'center',
     paddingHorizontal: 30,
     zIndex: 1,
@@ -232,8 +326,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: 1,
   },
+  registerButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    marginTop: 15,
+    borderWidth: 2,
+    borderColor: '#592644',
+  },
+  registerButtonText: {
+    color: '#592644',
+    fontWeight: 'bold',
+    fontSize: 16,
+    letterSpacing: 1,
+  },
   logo: {
     width: 350,
     height: 130,
+  },
+  loginButtonDisabled: {
+    opacity: 0.7,
   },
 }); 
