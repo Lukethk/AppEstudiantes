@@ -1,20 +1,22 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Vibration,
+  View
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
@@ -44,7 +46,23 @@ interface Materia {
   carrera_nombre: string;
 }
 
+interface Solicitud {
+  id_solicitud: number;
+  id_materia: number;
+  fecha_hora_inicio: string;
+  fecha_hora_fin: string;
+  observaciones: string;
+  estado: string;
+  insumos: {
+    id_insumo: number;
+    cantidad_solicitada: number;
+  }[];
+}
+
 export default function NuevaSolicitudScreen() {
+  const { id } = useLocalSearchParams();
+  const [isEditing, setIsEditing] = useState(false);
+  const [solicitudOriginal, setSolicitudOriginal] = useState<Solicitud | null>(null);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [insumosFiltrados, setInsumosFiltrados] = useState<Insumo[]>([]);
   const [busqueda, setBusqueda] = useState('');
@@ -62,12 +80,20 @@ export default function NuevaSolicitudScreen() {
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
   const [showMateriaModal, setShowMateriaModal] = useState(false);
   const [showInsumosModal, setShowInsumosModal] = useState(false);
+  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
   const { isDark } = useTheme();
+
+  const esEdicionSoloAgregarInsumos = isEditing && (solicitudOriginal?.estado.toLowerCase() === 'pendiente' || solicitudOriginal?.estado.toLowerCase() === 'aprobada');
 
   useEffect(() => {
     fetchInsumos();
     fetchMaterias();
-  }, []);
+    if (id) {
+      fetchSolicitud();
+    }
+  }, [id]);
 
   const fetchMaterias = async () => {
     try {
@@ -91,6 +117,46 @@ export default function NuevaSolicitudScreen() {
       Alert.alert('Error', 'No se pudieron cargar los insumos');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSolicitud = async () => {
+    try {
+      const response = await fetch(`https://universidad-la9h.onrender.com/estudiantes/solicitudes/${id}`);
+      if (!response.ok) throw new Error('Error al cargar la solicitud');
+      const data = await response.json();
+      
+      setSolicitudOriginal(data);
+      setIsEditing(true);
+      
+      // Cargar datos de la solicitud
+      setFechaInicio(new Date(data.fecha_hora_inicio));
+      setFechaFin(new Date(data.fecha_hora_fin));
+      setObservaciones(data.observaciones || '');
+
+      // Cargar materia
+      const materia = materias.find(m => m.id_materia === data.id_materia);
+      if (materia) {
+        setMateriaSeleccionada(materia);
+      }
+
+      // Cargar insumos
+      const insumosSolicitados = await Promise.all(
+        data.insumos.map(async (insumo: any) => {
+          const response = await fetch(`https://universidad-la9h.onrender.com/insumos/${insumo.id_insumo}`);
+          const insumoData = await response.json();
+          return {
+            id_insumo: insumo.id_insumo,
+            nombre: insumoData.nombre,
+            cantidad_solicitada: insumo.cantidad_solicitada,
+            unidad_medida: insumoData.unidad_medida
+          };
+        })
+      );
+      setInsumosSeleccionados(insumosSolicitados);
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo cargar la solicitud');
+      router.back();
     }
   };
 
@@ -124,17 +190,66 @@ export default function NuevaSolicitudScreen() {
   };
 
   const handleEliminarInsumo = (id_insumo: number) => {
+    if (isEditing && solicitudOriginal?.estado.toLowerCase() === 'aprobada') {
+      Alert.alert('Error', 'No se pueden eliminar insumos de una solicitud aprobada');
+      return;
+    }
     setInsumosSeleccionados(insumosSeleccionados.filter(i => i.id_insumo !== id_insumo));
   };
 
   const handleCambiarCantidad = (id_insumo: number, nuevaCantidad: number) => {
     if (nuevaCantidad < 1) return;
     
+    if (isEditing && solicitudOriginal?.estado.toLowerCase() === 'aprobada') {
+      const insumoOriginal = solicitudOriginal.insumos.find(i => i.id_insumo === id_insumo);
+      if (insumoOriginal && nuevaCantidad < insumoOriginal.cantidad_solicitada) {
+        Alert.alert('Error', 'No se puede reducir la cantidad de insumos en una solicitud aprobada');
+        return;
+      }
+    }
+    
     setInsumosSeleccionados(insumosSeleccionados.map(insumo => 
       insumo.id_insumo === id_insumo 
         ? { ...insumo, cantidad_solicitada: nuevaCantidad }
         : insumo
     ));
+  };
+
+  const animateSuccess = async () => {
+    setShowSuccessAnimation(true);
+    // Vibración corta para dar feedback
+    Vibration.vibrate(200);
+    
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.delay(1000),
+      Animated.parallel([
+        Animated.timing(scaleAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start(() => {
+      setShowSuccessAnimation(false);
+      router.replace('/');
+    });
   };
 
   const handleSubmit = async () => {
@@ -157,37 +272,152 @@ export default function NuevaSolicitudScreen() {
 
       const { id_estudiante } = JSON.parse(userData);
 
-      const solicitudData = {
-        id_estudiante,
-        id_materia: materiaSeleccionada.id_materia,
-        fecha_hora_inicio: fechaInicio.toISOString(),
-        fecha_hora_fin: fechaFin.toISOString(),
-        observaciones,
-        insumos: insumosSeleccionados.map(insumo => ({
-          id_insumo: insumo.id_insumo,
-          cantidad_solicitada: insumo.cantidad_solicitada
-        }))
-      };
+      // Si es edición y solo se pueden agregar insumos (pendiente o aprobada)
+      if (esEdicionSoloAgregarInsumos) {
+        const nuevosInsumos = insumosSeleccionados.filter(insumo => 
+          !solicitudOriginal.insumos.some(i => i.id_insumo === insumo.id_insumo)
+        );
 
-      const response = await fetch('https://universidad-la9h.onrender.com/estudiantes/solicitudes', {
-        method: 'POST',
+        if (nuevosInsumos.length === 0) {
+          Alert.alert('Aviso', 'No hay nuevos insumos para agregar');
+          return;
+        }
+
+        const url = `https://universidad-la9h.onrender.com/estudiantes/solicitudes/${id}/agregar-insumos`;
+        const requestData = {
+          nuevos_insumos: nuevosInsumos.map(insumo => ({
+            id_insumo: insumo.id_insumo,
+            cantidad_solicitada: insumo.cantidad_solicitada
+          }))
+        };
+
+        console.log('URL para agregar insumos:', url);
+        console.log('Datos a enviar:', JSON.stringify(requestData, null, 2));
+
+        const response = await fetch(url, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(requestData)
+        });
+
+        let errorMessage = '';
+        try {
+          const responseText = await response.text();
+          console.log('Respuesta del servidor:', responseText);
+          if (!response.ok) {
+            try {
+              const errorData = JSON.parse(responseText);
+              errorMessage = errorData.message || 'Error al agregar insumos';
+            } catch (parseError) {
+              if (responseText.includes('<!DOCTYPE html>')) {
+                errorMessage = 'Error del servidor: Respuesta HTML inesperada';
+              } else {
+                errorMessage = `Error del servidor (${response.status}): ${responseText}`;
+              }
+            }
+            throw new Error(errorMessage);
+          } else {
+            // Mostrar mensaje si el estado vuelve a Pendiente
+            try {
+              const data = JSON.parse(responseText);
+              if (data.estado_solicitud && data.estado_solicitud === 'Pendiente') {
+                Alert.alert('Aviso', 'La solicitud ha vuelto al estado Pendiente y deberá ser revisada nuevamente.');
+              }
+            } catch (e) { /* ignorar error de parseo */ }
+          }
+        } catch (error) {
+          console.error('Error completo:', error);
+          Alert.alert('Error', error instanceof Error ? error.message : 'Error desconocido');
+          return;
+        }
+
+        animateSuccess();
+        return;
+      }
+
+      // Para solicitudes pendientes o nuevas
+      const solicitudData = isEditing
+        ? {
+            id_solicitud: Number(id),
+            id_estudiante,
+            id_materia: materiaSeleccionada.id_materia,
+            fecha_hora_inicio: fechaInicio.toISOString(),
+            fecha_hora_fin: fechaFin.toISOString(),
+            observaciones,
+            estado: (solicitudOriginal?.estado && solicitudOriginal.estado.charAt(0).toUpperCase() + solicitudOriginal.estado.slice(1).toLowerCase() === 'Pendiente')
+              ? 'Pendiente'
+              : capitalizarEstado(solicitudOriginal?.estado || 'Pendiente'),
+            insumos: insumosSeleccionados.map(insumo => ({
+              id_insumo: insumo.id_insumo,
+              cantidad_solicitada: insumo.cantidad_solicitada
+            }))
+          }
+        : {
+            id_estudiante,
+            id_materia: materiaSeleccionada.id_materia,
+            fecha_hora_inicio: fechaInicio.toISOString(),
+            fecha_hora_fin: fechaFin.toISOString(),
+            observaciones,
+            estado: 'Pendiente',
+            insumos: insumosSeleccionados.map(insumo => ({
+              id_insumo: insumo.id_insumo,
+              cantidad_solicitada: insumo.cantidad_solicitada
+            }))
+          };
+
+      const url = isEditing 
+        ? `https://universidad-la9h.onrender.com/estudiantes/solicitudes/${id}`
+        : 'https://universidad-la9h.onrender.com/estudiantes/solicitudes';
+
+      console.log('URL:', url);
+      console.log('Método:', isEditing ? 'PATCH' : 'POST');
+      console.log('Datos a enviar:', JSON.stringify(solicitudData, null, 2));
+
+      const response = await fetch(url, {
+        method: isEditing ? 'PATCH' : 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
         body: JSON.stringify(solicitudData)
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Error al crear la solicitud');
+      console.log('Status:', response.status);
+      console.log('Status Text:', response.statusText);
+
+      let errorMessage = '';
+      try {
+        const responseText = await response.text();
+        console.log('Respuesta del servidor:', responseText);
+        
+        if (!response.ok) {
+          try {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.message || `Error al ${isEditing ? 'actualizar' : 'crear'} la solicitud`;
+          } catch (parseError) {
+            // Si no es JSON, probablemente es HTML o texto plano
+            if (responseText.includes('<!DOCTYPE html>')) {
+              errorMessage = 'Error del servidor: Respuesta HTML inesperada';
+            } else {
+              errorMessage = `Error del servidor (${response.status}): ${responseText}`;
+            }
+          }
+          throw new Error(errorMessage);
+        }
+      } catch (error) {
+        console.error('Error completo:', error);
+        Alert.alert('Error', error instanceof Error ? error.message : 'Error desconocido');
+        return;
       }
 
-      Alert.alert('Éxito', 'Solicitud creada correctamente', [
-        { text: 'OK', onPress: () => router.replace('/') }
-      ]);
+      animateSuccess();
 
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Error al crear la solicitud';
+      console.error('Error completo:', error);
+      const errorMessage = error instanceof Error ? error.message : `Error al ${isEditing ? 'actualizar' : 'crear'} la solicitud`;
       Alert.alert('Error', errorMessage);
     }
   };
@@ -201,7 +431,25 @@ export default function NuevaSolicitudScreen() {
     }
 
     if (selectedDate) {
+      const now = new Date();
+      now.setSeconds(0, 0); 
+      if (selectedDate < now) {
+        Alert.alert(
+          'Error',
+          'La fecha seleccionada no puede ser anterior a la fecha actual'
+        );
+        return;
+      }
+
       if (isStart) {
+        if (selectedDate > fechaFin) {
+          Alert.alert(
+            'Error',
+            'La fecha de inicio no puede ser posterior a la fecha de fin'
+          );
+          return;
+        }
+
         if (Platform.OS === 'ios') {
           if (pickerMode === 'date') {
             setFechaInicio(selectedDate);
@@ -226,6 +474,14 @@ export default function NuevaSolicitudScreen() {
           }
         }
       } else {
+        if (selectedDate < fechaInicio) {
+          Alert.alert(
+            'Error',
+            'La fecha de fin no puede ser anterior a la fecha de inicio'
+          );
+          return;
+        }
+
         if (Platform.OS === 'ios') {
           if (pickerMode === 'date') {
             setFechaFin(selectedDate);
@@ -279,41 +535,59 @@ export default function NuevaSolicitudScreen() {
     </TouchableOpacity>
   );
 
-  const renderInsumoSeleccionado = ({ item }: { item: InsumoSolicitado }) => (
-    <View style={[styles.insumoSeleccionado, isDark && styles.insumoSeleccionadoDark]}>
-      <View style={styles.insumoSeleccionadoInfo}>
-        <Text style={[styles.insumoSeleccionadoNombre, isDark && styles.insumoSeleccionadoNombreDark]}>
-          {item.nombre}
-        </Text>
-        <Text style={[styles.insumoSeleccionadoUnidad, isDark && styles.insumoSeleccionadoUnidadDark]}>
-          {item.unidad_medida}
-        </Text>
+  const renderInsumoSeleccionado = ({ item }: { item: InsumoSolicitado }) => {
+    const esSolicitudAprobada = isEditing && solicitudOriginal?.estado.toLowerCase() === 'aprobada';
+    const insumoOriginal = esSolicitudAprobada ? 
+      solicitudOriginal?.insumos.find(i => i.id_insumo === item.id_insumo) : null;
+    const esInsumoOriginal = insumoOriginal !== undefined;
+
+    return (
+      <View style={[styles.insumoSeleccionado, isDark && styles.insumoSeleccionadoDark]}>
+        <View style={styles.insumoSeleccionadoInfo}>
+          <Text style={[styles.insumoSeleccionadoNombre, isDark && styles.insumoSeleccionadoNombreDark]}>
+            {item.nombre}
+          </Text>
+          <Text style={[styles.insumoSeleccionadoUnidad, isDark && styles.insumoSeleccionadoUnidadDark]}>
+            {item.unidad_medida}
+          </Text>
+          {esSolicitudAprobada && esInsumoOriginal && insumoOriginal && (
+            <Text style={[styles.insumoOriginalCantidad, isDark && styles.insumoOriginalCantidadDark]}>
+              Cantidad original: {insumoOriginal.cantidad_solicitada}
+            </Text>
+          )}
+        </View>
+        <View style={styles.insumoSeleccionadoCantidad}>
+          <TouchableOpacity
+            style={[
+              styles.cantidadButton,
+              esSolicitudAprobada && esInsumoOriginal && item.cantidad_solicitada <= insumoOriginal!.cantidad_solicitada && styles.cantidadButtonDisabled
+            ]}
+            onPress={() => handleCambiarCantidad(item.id_insumo, item.cantidad_solicitada - 1)}
+            disabled={esSolicitudAprobada && esInsumoOriginal && item.cantidad_solicitada <= insumoOriginal!.cantidad_solicitada}
+          >
+            <MaterialIcons name="remove" size={20} color="#fff" />
+          </TouchableOpacity>
+          <Text style={[styles.cantidadText, isDark && styles.cantidadTextDark]}>
+            {item.cantidad_solicitada}
+          </Text>
+          <TouchableOpacity
+            style={styles.cantidadButton}
+            onPress={() => handleCambiarCantidad(item.id_insumo, item.cantidad_solicitada + 1)}
+          >
+            <MaterialIcons name="add" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        {!esSolicitudAprobada && (
+          <TouchableOpacity
+            style={styles.eliminarButton}
+            onPress={() => handleEliminarInsumo(item.id_insumo)}
+          >
+            <MaterialIcons name="delete" size={24} color="#e53935" />
+          </TouchableOpacity>
+        )}
       </View>
-      <View style={styles.insumoSeleccionadoCantidad}>
-        <TouchableOpacity
-          style={styles.cantidadButton}
-          onPress={() => handleCambiarCantidad(item.id_insumo, item.cantidad_solicitada - 1)}
-        >
-          <MaterialIcons name="remove" size={20} color="#fff" />
-        </TouchableOpacity>
-        <Text style={[styles.cantidadText, isDark && styles.cantidadTextDark]}>
-          {item.cantidad_solicitada}
-        </Text>
-        <TouchableOpacity
-          style={styles.cantidadButton}
-          onPress={() => handleCambiarCantidad(item.id_insumo, item.cantidad_solicitada + 1)}
-        >
-          <MaterialIcons name="add" size={20} color="#fff" />
-        </TouchableOpacity>
-      </View>
-      <TouchableOpacity
-        style={styles.eliminarButton}
-        onPress={() => handleEliminarInsumo(item.id_insumo)}
-      >
-        <MaterialIcons name="delete" size={24} color="#e53935" />
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   if (loading) {
     return (
@@ -335,7 +609,9 @@ export default function NuevaSolicitudScreen() {
         >
           <MaterialIcons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Nueva Solicitud</Text>
+        <Text style={styles.headerTitle}>
+          {isEditing ? 'Editar Solicitud' : 'Nueva Solicitud'}
+        </Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -409,7 +685,9 @@ export default function NuevaSolicitudScreen() {
             style={styles.submitButton}
             onPress={handleSubmit}
           >
-            <Text style={styles.submitButtonText}>CREAR SOLICITUD</Text>
+            <Text style={styles.submitButtonText}>
+              {isEditing ? 'ACTUALIZAR SOLICITUD' : 'CREAR SOLICITUD'}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -430,13 +708,47 @@ export default function NuevaSolicitudScreen() {
                     <MaterialIcons name="close" size={24} color={isDark ? '#fff' : '#333'} />
                   </TouchableOpacity>
                 </View>
-                <DateTimePicker
-                  value={fechaInicio}
-                  mode={pickerMode}
-                  display="spinner"
-                  onChange={(event, date) => handleDateChange(event, date, true)}
-                  style={styles.dateTimePicker}
-                />
+                <View style={styles.dateTimePickerContainer}>
+                  <DateTimePicker
+                    value={fechaInicio}
+                    mode={pickerMode}
+                    display="spinner"
+                    onChange={(event, date) => {
+                      if (date && pickerMode === 'date') {
+                        const newDate = new Date(date);
+                        newDate.setHours(fechaInicio.getHours());
+                        newDate.setMinutes(fechaInicio.getMinutes());
+                        setFechaInicio(newDate);
+                      } else if (date && pickerMode === 'time') {
+                        const newDate = new Date(fechaInicio);
+                        newDate.setHours(date.getHours());
+                        newDate.setMinutes(date.getMinutes());
+                        setFechaInicio(newDate);
+                      }
+                    }}
+                    style={styles.dateTimePicker}
+                    textColor={isDark ? '#fff' : '#333'}
+                    minimumDate={new Date()}
+                  />
+                  {pickerMode === 'date' ? (
+                    <TouchableOpacity
+                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
+                      onPress={() => setPickerMode('time')}
+                    >
+                      <Text style={styles.nextButtonText}>Confirmar Fecha</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
+                      onPress={() => {
+                        setShowDatePickerInicio(false);
+                        setPickerMode('date');
+                      }}
+                    >
+                      <Text style={styles.nextButtonText}>Confirmar Hora</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             </View>
           )}
@@ -455,13 +767,47 @@ export default function NuevaSolicitudScreen() {
                     <MaterialIcons name="close" size={24} color={isDark ? '#fff' : '#333'} />
                   </TouchableOpacity>
                 </View>
-                <DateTimePicker
-                  value={fechaFin}
-                  mode={pickerMode}
-                  display="spinner"
-                  onChange={(event, date) => handleDateChange(event, date, false)}
-                  style={styles.dateTimePicker}
-                />
+                <View style={styles.dateTimePickerContainer}>
+                  <DateTimePicker
+                    value={fechaFin}
+                    mode={pickerMode}
+                    display="spinner"
+                    onChange={(event, date) => {
+                      if (date && pickerMode === 'date') {
+                        const newDate = new Date(date);
+                        newDate.setHours(fechaFin.getHours());
+                        newDate.setMinutes(fechaFin.getMinutes());
+                        setFechaFin(newDate);
+                      } else if (date && pickerMode === 'time') {
+                        const newDate = new Date(fechaFin);
+                        newDate.setHours(date.getHours());
+                        newDate.setMinutes(date.getMinutes());
+                        setFechaFin(newDate);
+                      }
+                    }}
+                    style={styles.dateTimePicker}
+                    textColor={isDark ? '#fff' : '#333'}
+                    minimumDate={fechaInicio}
+                  />
+                  {pickerMode === 'date' ? (
+                    <TouchableOpacity
+                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
+                      onPress={() => setPickerMode('time')}
+                    >
+                      <Text style={styles.nextButtonText}>Confirmar Fecha</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
+                      onPress={() => {
+                        setShowDatePickerFin(false);
+                        setPickerMode('date');
+                      }}
+                    >
+                      <Text style={styles.nextButtonText}>Confirmar Hora</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             </View>
           )}
@@ -585,6 +931,25 @@ export default function NuevaSolicitudScreen() {
               />
             </View>
           </View>
+        </View>
+      )}
+
+      {showSuccessAnimation && (
+        <View style={styles.successOverlay}>
+          <Animated.View
+            style={[
+              styles.successContainer,
+              {
+                transform: [{ scale: scaleAnim }],
+                opacity: opacityAnim,
+              },
+            ]}
+          >
+            <View style={styles.checkmarkContainer}>
+              <MaterialIcons name="check-circle" size={80} color="#4CAF50" />
+            </View>
+            <Text style={styles.successText}>¡Solicitud enviada con éxito!</Text>
+          </Animated.View>
         </View>
       )}
     </KeyboardAvoidingView>
@@ -948,9 +1313,28 @@ const styles = StyleSheet.create({
   materiaItemDetallesDark: {
     color: '#aaa',
   },
+  dateTimePickerContainer: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
   dateTimePicker: {
     height: 200,
     width: '100%',
+  },
+  nextButton: {
+    backgroundColor: '#592644',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  nextButtonDark: {
+    backgroundColor: '#7a3a5f',
+  },
+  nextButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   insumosSelector: {
     backgroundColor: '#fff',
@@ -991,4 +1375,47 @@ const styles = StyleSheet.create({
   modalSection: {
     marginBottom: 20,
   },
-}); 
+  successOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  successContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 30,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  checkmarkContainer: {
+    marginBottom: 20,
+  },
+  successText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  cantidadButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  insumoOriginalCantidad: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  insumoOriginalCantidadDark: {
+    color: '#aaa',
+  },
+});
+
+function capitalizarEstado(estado: string) {
+  if (!estado) return 'Pendiente';
+  return estado.charAt(0).toUpperCase() + estado.slice(1).toLowerCase();
+} 

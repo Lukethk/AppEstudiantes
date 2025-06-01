@@ -20,6 +20,12 @@ interface Solicitud {
   fecha_hora_fin?: string;
   descripcion?: string;
   observaciones?: string;
+  insumos: {
+    id_insumo: number;
+    nombre: string;
+    cantidad_solicitada: number;
+    unidad_medida: string;
+  }[];
 }
 
 export default function SolicitudDetalleScreen() {
@@ -34,20 +40,13 @@ export default function SolicitudDetalleScreen() {
 
   const fetchSolicitud = async () => {
     try {
-      const response = await fetch(`https://universidad-la9h.onrender.com/estudiantes/solicitudes/${id}`, {
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Error al cargar la solicitud');
-      }
-
+      const response = await fetch(`https://universidad-la9h.onrender.com/estudiantes/solicitudes/${id}`);
+      if (!response.ok) throw new Error('Error al cargar la solicitud');
       const data = await response.json();
       setSolicitud(data);
     } catch (error) {
       Alert.alert('Error', 'No se pudo cargar la solicitud');
+      router.back();
     } finally {
       setLoading(false);
     }
@@ -62,13 +61,17 @@ export default function SolicitudDetalleScreen() {
       case 'rechazada':
         return '#e53935';
       default:
-        return '#ccc';
+        return '#666';
     }
+  };
+
+  const handleEditar = () => {
+    router.push(`/nueva-solicitud?id=${id}`);
   };
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.centerContent]}>
+      <View style={[styles.container, styles.centerContent, isDark && styles.containerDark]}>
         <ActivityIndicator size="large" color="#592644" />
       </View>
     );
@@ -76,7 +79,7 @@ export default function SolicitudDetalleScreen() {
 
   if (!solicitud) {
     return (
-      <View style={[styles.container, styles.centerContent]}>
+      <View style={[styles.container, styles.centerContent, isDark && styles.containerDark]}>
         <Text style={[styles.errorText, isDark && styles.errorTextDark]}>
           No se encontró la solicitud
         </Text>
@@ -130,26 +133,49 @@ export default function SolicitudDetalleScreen() {
             )}
           </View>
 
-          {solicitud.descripcion && (
-            <View style={styles.infoSection}>
-              <Text style={[styles.sectionTitle, isDark && styles.sectionTitleDark]}>
-                Descripción
-              </Text>
-              <Text style={[styles.infoText, isDark && styles.infoTextDark]}>
-                {solicitud.descripcion}
-              </Text>
-            </View>
-          )}
+          <View style={styles.infoSection}>
+            <Text style={[styles.sectionTitle, isDark && styles.sectionTitleDark]}>
+              Observaciones
+            </Text>
+            <Text style={[styles.infoText, isDark && styles.infoTextDark]}>
+              {solicitud.observaciones || 'Sin observaciones'}
+            </Text>
+          </View>
 
-          {solicitud.observaciones && (
-            <View style={styles.infoSection}>
-              <Text style={[styles.sectionTitle, isDark && styles.sectionTitleDark]}>
-                Observaciones
-              </Text>
+          <View style={styles.infoSection}>
+            <Text style={[styles.sectionTitle, isDark && styles.sectionTitleDark]}>
+              Insumos Solicitados
+            </Text>
+            {solicitud.insumos && solicitud.insumos.length > 0 ? (
+              solicitud.insumos.map((insumo, index) => (
+                <View key={index} style={[styles.insumoItem, isDark && styles.insumoItemDark]}>
+                  <View style={styles.insumoInfo}>
+                    <Text style={[styles.insumoNombre, isDark && styles.insumoNombreDark]}>
+                      {insumo.nombre}
+                    </Text>
+                    <Text style={[styles.insumoCantidad, isDark && styles.insumoCantidadDark]}>
+                      Cantidad: {insumo.cantidad_solicitada} {insumo.unidad_medida}
+                    </Text>
+                  </View>
+                </View>
+              ))
+            ) : (
               <Text style={[styles.infoText, isDark && styles.infoTextDark]}>
-                {solicitud.observaciones}
+                No hay insumos solicitados
               </Text>
-            </View>
+            )}
+          </View>
+
+          {(solicitud.estado.toLowerCase() === 'pendiente' || solicitud.estado.toLowerCase() === 'aprobada') && (
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={handleEditar}
+            >
+              <MaterialIcons name="edit" size={20} color="#fff" style={styles.editIcon} />
+              <Text style={styles.editButtonText}>
+                {solicitud.estado.toLowerCase() === 'aprobada' ? 'Agregar Insumos' : 'Editar Solicitud'}
+              </Text>
+            </TouchableOpacity>
           )}
         </View>
       </ScrollView>
@@ -175,8 +201,8 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     paddingHorizontal: 20,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
     shadowColor: '#000',
@@ -190,7 +216,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
   },
   content: {
@@ -199,8 +225,9 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#fff',
-    borderRadius: 15,
+    borderRadius: 12,
     padding: 20,
+    marginBottom: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -217,31 +244,29 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   cardTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
     flex: 1,
-    marginRight: 10,
   },
   cardTitleDark: {
     color: '#fff',
   },
   badge: {
-    paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
   badgeText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: 'bold',
-    textTransform: 'capitalize',
   },
   infoSection: {
     marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 10,
@@ -257,7 +282,7 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: 16,
     color: '#666',
-    marginLeft: 8,
+    marginLeft: 10,
   },
   infoTextDark: {
     color: '#aaa',
@@ -268,6 +293,51 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   errorTextDark: {
+    color: '#aaa',
+  },
+  editButton: {
+    backgroundColor: '#592644',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 15,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  editIcon: {
+    marginRight: 8,
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  insumoItem: {
+    backgroundColor: '#f5f5f5',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  insumoItemDark: {
+    backgroundColor: '#2d2d2d',
+  },
+  insumoInfo: {
+    flex: 1,
+  },
+  insumoNombre: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  insumoNombreDark: {
+    color: '#fff',
+  },
+  insumoCantidad: {
+    fontSize: 14,
+    color: '#666',
+  },
+  insumoCantidadDark: {
     color: '#aaa',
   },
 }); 

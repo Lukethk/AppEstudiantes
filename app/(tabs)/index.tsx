@@ -3,15 +3,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -113,6 +113,19 @@ export default function HomeScreen() {
     }
   };
 
+  const getEstadoIcon = (estado: string) => {
+    switch (estado.toLowerCase()) {
+      case 'pendiente':
+        return 'hourglass-empty';
+      case 'aprobada':
+        return 'check-circle';
+      case 'rechazada':
+        return 'cancel';
+      default:
+        return 'help';
+    }
+  };
+
   const solicitudesFiltradas = solicitudes.filter(s => s.estado.toLowerCase() === filtro.toLowerCase());
 
   if (loading) {
@@ -190,19 +203,41 @@ export default function HomeScreen() {
                   {solicitud.materia_nombre}
                 </Text>
                 <View style={[styles.badge, { backgroundColor: getEstadoColor(solicitud.estado) }]}>
+                  <MaterialIcons 
+                    name={getEstadoIcon(solicitud.estado)} 
+                    size={16} 
+                    color="#fff" 
+                    style={styles.badgeIcon}
+                  />
                   <Text style={styles.badgeText}>
                     {solicitud.estado}
                   </Text>
                 </View>
               </View>
-              <Text style={[styles.cardText, isDark && styles.cardTextDark]}>
-                Fecha: {new Date(solicitud.fecha_hora_inicio).toLocaleString()}
-              </Text>
-              {solicitud.fecha_hora_fin && (
-                <Text style={[styles.cardText, isDark && styles.cardTextDark]}>
-                  Fin: {new Date(solicitud.fecha_hora_fin).toLocaleString()}
-                </Text>
-              )}
+              <View style={styles.cardContent}>
+                <View style={styles.infoRow}>
+                  <MaterialIcons name="event" size={20} color={isDark ? '#aaa' : '#666'} />
+                  <Text style={[styles.cardText, isDark && styles.cardTextDark]}>
+                    Inicio: {new Date(solicitud.fecha_hora_inicio).toLocaleString()}
+                  </Text>
+                </View>
+                {solicitud.fecha_hora_fin && (
+                  <View style={styles.infoRow}>
+                    <MaterialIcons name="event" size={20} color={isDark ? '#aaa' : '#666'} />
+                    <Text style={[styles.cardText, isDark && styles.cardTextDark]}>
+                      Fin: {new Date(solicitud.fecha_hora_fin).toLocaleString()}
+                    </Text>
+                  </View>
+                )}
+                {solicitud.estado.toLowerCase() === 'aprobada' && (
+                  <View style={styles.approvedInfo}>
+                    <MaterialIcons name="check-circle" size={20} color="#4caf50" />
+                    <Text style={[styles.approvedText, isDark && styles.approvedTextDark]}>
+                      Solicitud aprobada
+                    </Text>
+                  </View>
+                )}
+              </View>
             </TouchableOpacity>
           ))
         )}
@@ -384,5 +419,32 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  cardContent: {
+    padding: 12,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  badgeIcon: {
+    marginRight: 4,
+  },
+  approvedInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    padding: 8,
+    borderRadius: 4,
+    marginTop: 8,
+  },
+  approvedText: {
+    color: '#4caf50',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  approvedTextDark: {
+    color: '#81c784',
   },
 });
