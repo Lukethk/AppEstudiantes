@@ -1,22 +1,21 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  Vibration,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    FlatList,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    Vibration,
+    View
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
@@ -49,8 +48,6 @@ interface Materia {
 interface Solicitud {
   id_solicitud: number;
   id_materia: number;
-  fecha_hora_inicio: string;
-  fecha_hora_fin: string;
   observaciones: string;
   estado: string;
   insumos: {
@@ -70,14 +67,7 @@ export default function NuevaSolicitudScreen() {
   const [loading, setLoading] = useState(true);
   const [materias, setMaterias] = useState<Materia[]>([]);
   const [materiaSeleccionada, setMateriaSeleccionada] = useState<Materia | null>(null);
-  const [fechaInicio, setFechaInicio] = useState(new Date());
-  const [fechaFin, setFechaFin] = useState(new Date());
   const [observaciones, setObservaciones] = useState('');
-  const [showDatePickerInicio, setShowDatePickerInicio] = useState(false);
-  const [showTimePickerInicio, setShowTimePickerInicio] = useState(false);
-  const [showDatePickerFin, setShowDatePickerFin] = useState(false);
-  const [showTimePickerFin, setShowTimePickerFin] = useState(false);
-  const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
   const [showMateriaModal, setShowMateriaModal] = useState(false);
   const [showInsumosModal, setShowInsumosModal] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
@@ -129,11 +119,6 @@ export default function NuevaSolicitudScreen() {
       setSolicitudOriginal(data);
       setIsEditing(true);
       
-      // Cargar datos de la solicitud
-      setFechaInicio(new Date(data.fecha_hora_inicio));
-      setFechaFin(new Date(data.fecha_hora_fin));
-      setObservaciones(data.observaciones || '');
-
       // Cargar materia
       const materia = materias.find(m => m.id_materia === data.id_materia);
       if (materia) {
@@ -254,23 +239,29 @@ export default function NuevaSolicitudScreen() {
 
   const handleSubmit = async () => {
     if (!materiaSeleccionada) {
-      Alert.alert('Error', 'Debes seleccionar una materia');
+      Alert.alert('Error', 'Por favor seleccione una materia');
       return;
     }
 
     if (insumosSeleccionados.length === 0) {
-      Alert.alert('Error', 'Debes seleccionar al menos un insumo');
+      Alert.alert('Error', 'Por favor seleccione al menos un insumo');
       return;
     }
 
     try {
+      const id_estudiante = await AsyncStorage.getItem('id_estudiante');
+      if (!id_estudiante) {
+        Alert.alert('Error', 'No se pudo obtener el ID del estudiante');
+        return;
+      }
+
       const userData = await AsyncStorage.getItem('userData');
       if (!userData) {
         Alert.alert('Error', 'No se encontró la información del usuario');
         return;
       }
 
-      const { id_estudiante } = JSON.parse(userData);
+      const { id_estudiante: storedId_estudiante } = JSON.parse(userData);
 
       // Si es edición y solo se pueden agregar insumos (pendiente o aprobada)
       if (esEdicionSoloAgregarInsumos) {
@@ -344,8 +335,6 @@ export default function NuevaSolicitudScreen() {
             id_solicitud: Number(id),
             id_estudiante,
             id_materia: materiaSeleccionada.id_materia,
-            fecha_hora_inicio: fechaInicio.toISOString(),
-            fecha_hora_fin: fechaFin.toISOString(),
             observaciones,
             estado: (solicitudOriginal?.estado && solicitudOriginal.estado.charAt(0).toUpperCase() + solicitudOriginal.estado.slice(1).toLowerCase() === 'Pendiente')
               ? 'Pendiente'
@@ -358,8 +347,6 @@ export default function NuevaSolicitudScreen() {
         : {
             id_estudiante,
             id_materia: materiaSeleccionada.id_materia,
-            fecha_hora_inicio: fechaInicio.toISOString(),
-            fecha_hora_fin: fechaFin.toISOString(),
             observaciones,
             estado: 'Pendiente',
             insumos: insumosSeleccionados.map(insumo => ({
@@ -419,93 +406,6 @@ export default function NuevaSolicitudScreen() {
       console.error('Error completo:', error);
       const errorMessage = error instanceof Error ? error.message : `Error al ${isEditing ? 'actualizar' : 'crear'} la solicitud`;
       Alert.alert('Error', errorMessage);
-    }
-  };
-
-  const handleDateChange = (event: any, selectedDate?: Date, isStart: boolean = true) => {
-    if (Platform.OS === 'android') {
-      setShowDatePickerInicio(false);
-      setShowDatePickerFin(false);
-      setShowTimePickerInicio(false);
-      setShowTimePickerFin(false);
-    }
-
-    if (selectedDate) {
-      const now = new Date();
-      now.setSeconds(0, 0); 
-      if (selectedDate < now) {
-        Alert.alert(
-          'Error',
-          'La fecha seleccionada no puede ser anterior a la fecha actual'
-        );
-        return;
-      }
-
-      if (isStart) {
-        if (selectedDate > fechaFin) {
-          Alert.alert(
-            'Error',
-            'La fecha de inicio no puede ser posterior a la fecha de fin'
-          );
-          return;
-        }
-
-        if (Platform.OS === 'ios') {
-          if (pickerMode === 'date') {
-            setFechaInicio(selectedDate);
-            setPickerMode('time');
-          } else {
-            const newDate = new Date(fechaInicio);
-            newDate.setHours(selectedDate.getHours());
-            newDate.setMinutes(selectedDate.getMinutes());
-            setFechaInicio(newDate);
-            setShowDatePickerInicio(false);
-            setPickerMode('date');
-          }
-        } else {
-          if (showDatePickerInicio) {
-            setFechaInicio(selectedDate);
-            setShowTimePickerInicio(true);
-          } else if (showTimePickerInicio) {
-            const newDate = new Date(fechaInicio);
-            newDate.setHours(selectedDate.getHours());
-            newDate.setMinutes(selectedDate.getMinutes());
-            setFechaInicio(newDate);
-          }
-        }
-      } else {
-        if (selectedDate < fechaInicio) {
-          Alert.alert(
-            'Error',
-            'La fecha de fin no puede ser anterior a la fecha de inicio'
-          );
-          return;
-        }
-
-        if (Platform.OS === 'ios') {
-          if (pickerMode === 'date') {
-            setFechaFin(selectedDate);
-            setPickerMode('time');
-          } else {
-            const newDate = new Date(fechaFin);
-            newDate.setHours(selectedDate.getHours());
-            newDate.setMinutes(selectedDate.getMinutes());
-            setFechaFin(newDate);
-            setShowDatePickerFin(false);
-            setPickerMode('date');
-          }
-        } else {
-          if (showDatePickerFin) {
-            setFechaFin(selectedDate);
-            setShowTimePickerFin(true);
-          } else if (showTimePickerFin) {
-            const newDate = new Date(fechaFin);
-            newDate.setHours(selectedDate.getHours());
-            newDate.setMinutes(selectedDate.getMinutes());
-            setFechaFin(newDate);
-          }
-        }
-      }
     }
   };
 
@@ -627,44 +527,16 @@ export default function NuevaSolicitudScreen() {
             <MaterialIcons name="arrow-drop-down" size={24} color={isDark ? '#fff' : '#333'} />
           </TouchableOpacity>
 
-          <View style={styles.dateContainer}>
-            <TouchableOpacity
-              style={[styles.dateSelector, isDark && styles.dateSelectorDark]}
-              onPress={() => {
-                setPickerMode('date');
-                setShowDatePickerInicio(true);
-              }}
-            >
-              <Text style={[styles.dateLabel, isDark && styles.dateLabelDark]}>Fecha Inicio:</Text>
-              <Text style={[styles.dateText, isDark && styles.dateTextDark]}>
-                {fechaInicio.toLocaleDateString()} {fechaInicio.toLocaleTimeString()}
-            </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.dateSelector, isDark && styles.dateSelectorDark]}
-              onPress={() => {
-                setPickerMode('date');
-                setShowDatePickerFin(true);
-              }}
-            >
-              <Text style={[styles.dateLabel, isDark && styles.dateLabelDark]}>Fecha Fin:</Text>
-              <Text style={[styles.dateText, isDark && styles.dateTextDark]}>
-                {fechaFin.toLocaleDateString()} {fechaFin.toLocaleTimeString()}
-            </Text>
-            </TouchableOpacity>
-          </View>
-
-            <TextInput
+          <TextInput
             style={[styles.observacionesInput, isDark && styles.observacionesInputDark]}
             placeholder="Observaciones..."
-              placeholderTextColor={isDark ? '#666' : '#999'}
+            placeholderTextColor={isDark ? '#666' : '#999'}
             value={observaciones}
             onChangeText={setObservaciones}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
+            multiline
+            numberOfLines={4}
+            textAlignVertical="top"
+          />
 
           <TouchableOpacity
             style={[styles.insumosSelector, isDark && styles.insumosSelectorDark]}
@@ -677,7 +549,7 @@ export default function NuevaSolicitudScreen() {
               <Text style={[styles.insumosSelectorCount, isDark && styles.insumosSelectorCountDark]}>
                 {insumosSeleccionados.length} insumos
               </Text>
-          </View>
+            </View>
             <MaterialIcons name="add-circle" size={24} color="#592644" />
           </TouchableOpacity>
 
@@ -691,163 +563,6 @@ export default function NuevaSolicitudScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
-
-      {Platform.OS === 'ios' ? (
-        <>
-          {showDatePickerInicio && (
-            <View style={styles.modalOverlay}>
-              <View style={[styles.modalContent, isDark && styles.modalContentDark]}>
-                <View style={styles.modalHeader}>
-                  <Text style={[styles.modalTitle, isDark && styles.modalTitleDark]}>
-                    Seleccionar Fecha y Hora de Inicio
-                  </Text>
-                  <TouchableOpacity onPress={() => {
-                    setShowDatePickerInicio(false);
-                    setPickerMode('date');
-                  }}>
-                    <MaterialIcons name="close" size={24} color={isDark ? '#fff' : '#333'} />
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.dateTimePickerContainer}>
-                  <DateTimePicker
-                    value={fechaInicio}
-                    mode={pickerMode}
-                    display="spinner"
-                    onChange={(event, date) => {
-                      if (date && pickerMode === 'date') {
-                        const newDate = new Date(date);
-                        newDate.setHours(fechaInicio.getHours());
-                        newDate.setMinutes(fechaInicio.getMinutes());
-                        setFechaInicio(newDate);
-                      } else if (date && pickerMode === 'time') {
-                        const newDate = new Date(fechaInicio);
-                        newDate.setHours(date.getHours());
-                        newDate.setMinutes(date.getMinutes());
-                        setFechaInicio(newDate);
-                      }
-                    }}
-                    style={styles.dateTimePicker}
-                    textColor={isDark ? '#fff' : '#333'}
-                    minimumDate={new Date()}
-                  />
-                  {pickerMode === 'date' ? (
-                    <TouchableOpacity
-                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
-                      onPress={() => setPickerMode('time')}
-                    >
-                      <Text style={styles.nextButtonText}>Confirmar Fecha</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
-                      onPress={() => {
-                        setShowDatePickerInicio(false);
-                        setPickerMode('date');
-                      }}
-                    >
-                      <Text style={styles.nextButtonText}>Confirmar Hora</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            </View>
-          )}
-
-          {showDatePickerFin && (
-            <View style={styles.modalOverlay}>
-              <View style={[styles.modalContent, isDark && styles.modalContentDark]}>
-                <View style={styles.modalHeader}>
-                  <Text style={[styles.modalTitle, isDark && styles.modalTitleDark]}>
-                    Seleccionar Fecha y Hora de Fin
-                  </Text>
-                  <TouchableOpacity onPress={() => {
-                    setShowDatePickerFin(false);
-                    setPickerMode('date');
-                  }}>
-                    <MaterialIcons name="close" size={24} color={isDark ? '#fff' : '#333'} />
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.dateTimePickerContainer}>
-                  <DateTimePicker
-                    value={fechaFin}
-                    mode={pickerMode}
-                    display="spinner"
-                    onChange={(event, date) => {
-                      if (date && pickerMode === 'date') {
-                        const newDate = new Date(date);
-                        newDate.setHours(fechaFin.getHours());
-                        newDate.setMinutes(fechaFin.getMinutes());
-                        setFechaFin(newDate);
-                      } else if (date && pickerMode === 'time') {
-                        const newDate = new Date(fechaFin);
-                        newDate.setHours(date.getHours());
-                        newDate.setMinutes(date.getMinutes());
-                        setFechaFin(newDate);
-                      }
-                    }}
-                    style={styles.dateTimePicker}
-                    textColor={isDark ? '#fff' : '#333'}
-                    minimumDate={fechaInicio}
-                  />
-                  {pickerMode === 'date' ? (
-                    <TouchableOpacity
-                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
-                      onPress={() => setPickerMode('time')}
-                    >
-                      <Text style={styles.nextButtonText}>Confirmar Fecha</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={[styles.nextButton, isDark && styles.nextButtonDark]}
-                      onPress={() => {
-                        setShowDatePickerFin(false);
-                        setPickerMode('date');
-                      }}
-                    >
-                      <Text style={styles.nextButtonText}>Confirmar Hora</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            </View>
-          )}
-        </>
-      ) : (
-        <>
-          {showDatePickerInicio && (
-            <DateTimePicker
-              value={fechaInicio}
-              mode="date"
-              display="default"
-              onChange={(event, date) => handleDateChange(event, date, true)}
-            />
-          )}
-          {showTimePickerInicio && (
-            <DateTimePicker
-              value={fechaInicio}
-              mode="time"
-              display="default"
-              onChange={(event, date) => handleDateChange(event, date, true)}
-            />
-          )}
-          {showDatePickerFin && (
-            <DateTimePicker
-              value={fechaFin}
-              mode="date"
-              display="default"
-              onChange={(event, date) => handleDateChange(event, date, false)}
-            />
-          )}
-          {showTimePickerFin && (
-            <DateTimePicker
-              value={fechaFin}
-              mode="time"
-              display="default"
-              onChange={(event, date) => handleDateChange(event, date, false)}
-            />
-          )}
-        </>
-      )}
 
       {showMateriaModal && (
         <View style={styles.modalOverlay}>
@@ -1026,38 +741,6 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   materiaSelectorTextDark: {
-    color: '#fff',
-  },
-  dateContainer: {
-    gap: 10,
-    marginBottom: 15,
-  },
-  dateSelector: {
-    backgroundColor: '#fff',
-    padding: 15,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  dateSelectorDark: {
-    backgroundColor: '#2d2d2d',
-  },
-  dateLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 5,
-  },
-  dateLabelDark: {
-    color: '#aaa',
-  },
-  dateText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  dateTextDark: {
     color: '#fff',
   },
   observacionesInput: {
@@ -1312,29 +995,6 @@ const styles = StyleSheet.create({
   },
   materiaItemDetallesDark: {
     color: '#aaa',
-  },
-  dateTimePickerContainer: {
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  dateTimePicker: {
-    height: 200,
-    width: '100%',
-  },
-  nextButton: {
-    backgroundColor: '#592644',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
-    marginTop: 20,
-  },
-  nextButtonDark: {
-    backgroundColor: '#7a3a5f',
-  },
-  nextButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   insumosSelector: {
     backgroundColor: '#fff',
