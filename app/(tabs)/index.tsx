@@ -3,17 +3,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
+import { NotificationBadge } from '../../components/NotificationBadge';
+import { useNotifications } from '../../context/NotificationContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useAppState } from '../../hooks/useAppState';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
+import { useBackgroundTasks } from '../../hooks/useBackgroundTasks';
+import { useSolicitudNotifications } from '../../hooks/useSolicitudNotifications';
+import { useSolicitudStateMonitor } from '../../hooks/useSolicitudStateMonitor';
 
 const { height } = Dimensions.get('window');
 
@@ -31,7 +38,14 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { isDark } = useTheme();
-
+  const { registerForPushNotificationsAsync } = useNotifications();
+  const { handleSolicitudEstadoCambiado, cleanOldNotifications } = useSolicitudNotifications();
+  const { processStateChanges, initializeMonitor, checkReminders } = useSolicitudStateMonitor();
+  const { handleAppStateChange } = useAppState();
+  
+  useBackgroundTasks();
+  useAppState();
+  
   const fetchSolicitudes = async () => {
     try {
       const userData = await AsyncStorage.getItem('userData');
@@ -52,6 +66,14 @@ export default function HomeScreen() {
       }
   
       const data = await response.json();
+      
+      if (solicitudes.length === 0) {
+        initializeMonitor(data);
+      } else {
+        processStateChanges(data);
+        checkReminders(data);
+      }
+      
       setSolicitudes(data);
     } catch (error) {
       Alert.alert('Error', 'No se pudieron cargar las solicitudes');
@@ -60,10 +82,24 @@ export default function HomeScreen() {
       setRefreshing(false);
     }
   };
-  
+
+  const handleStateChange = (newSolicitudes: Solicitud[]) => {
+    console.log('🔄 Cambios detectados - Procesando notificaciones...');
+    
+    processStateChanges(newSolicitudes);
+    checkReminders(newSolicitudes);
+    setSolicitudes(newSolicitudes);
+  };
+
+  const { refreshNow, isEnabled: autoRefreshEnabled, currentInterval } = useAutoRefresh({
+    onRefresh: fetchSolicitudes,
+    onStateChange: handleStateChange,
+  });
 
   useEffect(() => {
     fetchSolicitudes();
+    registerForPushNotificationsAsync();
+    cleanOldNotifications();
   }, []);
 
   const onRefresh = () => {
@@ -73,6 +109,10 @@ export default function HomeScreen() {
 
   const handleNuevaSolicitud = () => {
     router.push('/nueva-solicitud');
+  };
+
+  const handleNotificaciones = () => {
+    router.push('/notificaciones');
   };
 
   const handleLogout = async () => {
@@ -139,6 +179,13 @@ export default function HomeScreen() {
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
       <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.notificationButton}
+          onPress={handleNotificaciones}
+        >
+          <MaterialIcons name="notifications" size={24} color="#fff" />
+          <NotificationBadge size={18} color="#e53935" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Mis Solicitudes</Text>
         <TouchableOpacity
           style={styles.logoutButton}
@@ -290,6 +337,11 @@ const styles = StyleSheet.create({
   logoutButton: {
     position: 'absolute',
     right: 20,
+    padding: 8,
+  },
+  notificationButton: {
+    position: 'absolute',
+    left: 20,
     padding: 8,
   },
   filtroContainer: {

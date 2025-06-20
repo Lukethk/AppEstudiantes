@@ -1,5 +1,6 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -48,6 +49,7 @@ interface Materia {
 interface Solicitud {
   id_solicitud: number;
   id_materia: number;
+  fecha_hora_inicio: string;
   observaciones: string;
   estado: string;
   insumos: {
@@ -67,6 +69,9 @@ export default function NuevaSolicitudScreen() {
   const [loading, setLoading] = useState(true);
   const [materias, setMaterias] = useState<Materia[]>([]);
   const [materiaSeleccionada, setMateriaSeleccionada] = useState<Materia | null>(null);
+  const [fechaHoraInicio, setFechaHoraInicio] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [observaciones, setObservaciones] = useState('');
   const [showMateriaModal, setShowMateriaModal] = useState(false);
   const [showInsumosModal, setShowInsumosModal] = useState(false);
@@ -175,8 +180,8 @@ export default function NuevaSolicitudScreen() {
   };
 
   const handleEliminarInsumo = (id_insumo: number) => {
-    if (isEditing && solicitudOriginal?.estado.toLowerCase() === 'aprobada') {
-      Alert.alert('Error', 'No se pueden eliminar insumos de una solicitud aprobada');
+    if (isEditing) {
+      Alert.alert('Error', 'No se pueden eliminar insumos al editar una solicitud');
       return;
     }
     setInsumosSeleccionados(insumosSeleccionados.filter(i => i.id_insumo !== id_insumo));
@@ -185,10 +190,10 @@ export default function NuevaSolicitudScreen() {
   const handleCambiarCantidad = (id_insumo: number, nuevaCantidad: number) => {
     if (nuevaCantidad < 1) return;
     
-    if (isEditing && solicitudOriginal?.estado.toLowerCase() === 'aprobada') {
-      const insumoOriginal = solicitudOriginal.insumos.find(i => i.id_insumo === id_insumo);
+    if (isEditing) {
+      const insumoOriginal = solicitudOriginal?.insumos.find(i => i.id_insumo === id_insumo);
       if (insumoOriginal && nuevaCantidad < insumoOriginal.cantidad_solicitada) {
-        Alert.alert('Error', 'No se puede reducir la cantidad de insumos en una solicitud aprobada');
+        Alert.alert('Error', 'No se puede reducir la cantidad de insumos al editar una solicitud');
         return;
       }
     }
@@ -237,8 +242,46 @@ export default function NuevaSolicitudScreen() {
     });
   };
 
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+
+    if (selectedDate) {
+      const now = new Date();
+      if (selectedDate < now) {
+        Alert.alert(
+          'Error',
+          'La fecha seleccionada no puede ser anterior a la fecha actual'
+        );
+        return;
+      }
+
+      if (Platform.OS === 'ios') {
+        setFechaHoraInicio(selectedDate);
+        setShowTimePicker(true);
+      } else {
+        setFechaHoraInicio(selectedDate);
+        setShowTimePicker(true);
+      }
+    }
+  };
+
+  const handleTimeChange = (event: any, selectedTime?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
+
+    if (selectedTime) {
+      const newDate = new Date(fechaHoraInicio);
+      newDate.setHours(selectedTime.getHours());
+      newDate.setMinutes(selectedTime.getMinutes());
+      setFechaHoraInicio(newDate);
+    }
+  };
+
   const handleSubmit = async () => {
-    if (!materiaSeleccionada) {
+    if (!isEditing && !materiaSeleccionada) {
       Alert.alert('Error', 'Por favor seleccione una materia');
       return;
     }
@@ -249,19 +292,17 @@ export default function NuevaSolicitudScreen() {
     }
 
     try {
-      const id_estudiante = await AsyncStorage.getItem('id_estudiante');
-      if (!id_estudiante) {
-        Alert.alert('Error', 'No se pudo obtener el ID del estudiante');
-        return;
-      }
-
       const userData = await AsyncStorage.getItem('userData');
       if (!userData) {
         Alert.alert('Error', 'No se encontró la información del usuario');
         return;
       }
 
-      const { id_estudiante: storedId_estudiante } = JSON.parse(userData);
+      const { id_estudiante } = JSON.parse(userData);
+      if (!id_estudiante) {
+        Alert.alert('Error', 'No se pudo obtener el ID del estudiante');
+        return;
+      }
 
       // Si es edición y solo se pueden agregar insumos (pendiente o aprobada)
       if (esEdicionSoloAgregarInsumos) {
@@ -310,14 +351,6 @@ export default function NuevaSolicitudScreen() {
               }
             }
             throw new Error(errorMessage);
-          } else {
-            // Mostrar mensaje si el estado vuelve a Pendiente
-            try {
-              const data = JSON.parse(responseText);
-              if (data.estado_solicitud && data.estado_solicitud === 'Pendiente') {
-                Alert.alert('Aviso', 'La solicitud ha vuelto al estado Pendiente y deberá ser revisada nuevamente.');
-              }
-            } catch (e) { /* ignorar error de parseo */ }
           }
         } catch (error) {
           console.error('Error completo:', error);
@@ -333,8 +366,9 @@ export default function NuevaSolicitudScreen() {
       const solicitudData = isEditing
         ? {
             id_solicitud: Number(id),
-            id_estudiante,
-            id_materia: materiaSeleccionada.id_materia,
+            id_estudiante: Number(id_estudiante),
+            id_materia: solicitudOriginal?.id_materia,
+            fecha_hora_inicio: fechaHoraInicio.toISOString(),
             observaciones,
             estado: (solicitudOriginal?.estado && solicitudOriginal.estado.charAt(0).toUpperCase() + solicitudOriginal.estado.slice(1).toLowerCase() === 'Pendiente')
               ? 'Pendiente'
@@ -345,8 +379,9 @@ export default function NuevaSolicitudScreen() {
             }))
           }
         : {
-            id_estudiante,
+            id_estudiante: Number(id_estudiante),
             id_materia: materiaSeleccionada.id_materia,
+            fecha_hora_inicio: fechaHoraInicio.toISOString(),
             observaciones,
             estado: 'Pendiente',
             insumos: insumosSeleccionados.map(insumo => ({
@@ -436,8 +471,8 @@ export default function NuevaSolicitudScreen() {
   );
 
   const renderInsumoSeleccionado = ({ item }: { item: InsumoSolicitado }) => {
-    const esSolicitudAprobada = isEditing && solicitudOriginal?.estado.toLowerCase() === 'aprobada';
-    const insumoOriginal = esSolicitudAprobada ? 
+    const esSolicitudEditada = isEditing;
+    const insumoOriginal = esSolicitudEditada ? 
       solicitudOriginal?.insumos.find(i => i.id_insumo === item.id_insumo) : null;
     const esInsumoOriginal = insumoOriginal !== undefined;
 
@@ -450,7 +485,7 @@ export default function NuevaSolicitudScreen() {
           <Text style={[styles.insumoSeleccionadoUnidad, isDark && styles.insumoSeleccionadoUnidadDark]}>
             {item.unidad_medida}
           </Text>
-          {esSolicitudAprobada && esInsumoOriginal && insumoOriginal && (
+          {esSolicitudEditada && esInsumoOriginal && insumoOriginal && (
             <Text style={[styles.insumoOriginalCantidad, isDark && styles.insumoOriginalCantidadDark]}>
               Cantidad original: {insumoOriginal.cantidad_solicitada}
             </Text>
@@ -460,10 +495,10 @@ export default function NuevaSolicitudScreen() {
           <TouchableOpacity
             style={[
               styles.cantidadButton,
-              esSolicitudAprobada && esInsumoOriginal && item.cantidad_solicitada <= insumoOriginal!.cantidad_solicitada && styles.cantidadButtonDisabled
+              esSolicitudEditada && esInsumoOriginal && item.cantidad_solicitada <= insumoOriginal!.cantidad_solicitada && styles.cantidadButtonDisabled
             ]}
             onPress={() => handleCambiarCantidad(item.id_insumo, item.cantidad_solicitada - 1)}
-            disabled={esSolicitudAprobada && esInsumoOriginal && item.cantidad_solicitada <= insumoOriginal!.cantidad_solicitada}
+            disabled={esSolicitudEditada && esInsumoOriginal && item.cantidad_solicitada <= insumoOriginal!.cantidad_solicitada}
           >
             <MaterialIcons name="remove" size={20} color="#fff" />
           </TouchableOpacity>
@@ -477,7 +512,7 @@ export default function NuevaSolicitudScreen() {
             <MaterialIcons name="add" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
-        {!esSolicitudAprobada && (
+        {!esSolicitudEditada && (
           <TouchableOpacity
             style={styles.eliminarButton}
             onPress={() => handleEliminarInsumo(item.id_insumo)}
@@ -518,13 +553,36 @@ export default function NuevaSolicitudScreen() {
       <ScrollView style={styles.content}>
         <View style={[styles.form, isDark && styles.formDark]}>
           <TouchableOpacity
-            style={[styles.materiaSelector, isDark && styles.materiaSelectorDark]}
-            onPress={() => setShowMateriaModal(true)}
+            style={[
+              styles.materiaSelector,
+              isDark && styles.materiaSelectorDark,
+              isEditing && styles.materiaSelectorDisabled
+            ]}
+            onPress={() => !isEditing && setShowMateriaModal(true)}
+            disabled={isEditing}
           >
-            <Text style={[styles.materiaSelectorText, isDark && styles.materiaSelectorTextDark]}>
+            <Text style={[
+              styles.materiaSelectorText,
+              isDark && styles.materiaSelectorTextDark,
+              isEditing && styles.materiaSelectorTextDisabled
+            ]}>
               {materiaSeleccionada ? materiaSeleccionada.nombre : 'Seleccionar Materia'}
             </Text>
-            <MaterialIcons name="arrow-drop-down" size={24} color={isDark ? '#fff' : '#333'} />
+            {!isEditing && (
+              <MaterialIcons name="arrow-drop-down" size={24} color={isDark ? '#fff' : '#333'} />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.dateTimeSelector, isDark && styles.dateTimeSelectorDark]}
+            onPress={() => setShowDatePicker(true)}
+          >
+            <Text style={[styles.dateTimeLabel, isDark && styles.dateTimeLabelDark]}>
+              Fecha y Hora de Inicio:
+            </Text>
+            <Text style={[styles.dateTimeText, isDark && styles.dateTimeTextDark]}>
+              {fechaHoraInicio.toLocaleString()}
+            </Text>
           </TouchableOpacity>
 
           <TextInput
@@ -649,6 +707,55 @@ export default function NuevaSolicitudScreen() {
         </View>
       )}
 
+      {Platform.OS === 'ios' ? (
+        <>
+          {showDatePicker && (
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContent, isDark && styles.modalContentDark]}>
+                <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, isDark && styles.modalTitleDark]}>
+                    Seleccionar Fecha y Hora
+                  </Text>
+                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                    <MaterialIcons name="close" size={24} color={isDark ? '#fff' : '#333'} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.dateTimePickerContainer}>
+                  <DateTimePicker
+                    value={fechaHoraInicio}
+                    mode="datetime"
+                    display="spinner"
+                    onChange={handleDateChange}
+                    style={styles.dateTimePicker}
+                    textColor={isDark ? '#fff' : '#333'}
+                    minimumDate={new Date()}
+                  />
+                </View>
+              </View>
+            </View>
+          )}
+        </>
+      ) : (
+        <>
+          {showDatePicker && (
+            <DateTimePicker
+              value={fechaHoraInicio}
+              mode="date"
+              display="default"
+              onChange={handleDateChange}
+            />
+          )}
+          {showTimePicker && (
+            <DateTimePicker
+              value={fechaHoraInicio}
+              mode="time"
+              display="default"
+              onChange={handleTimeChange}
+            />
+          )}
+        </>
+      )}
+
       {showSuccessAnimation && (
         <View style={styles.successOverlay}>
           <Animated.View
@@ -742,6 +849,43 @@ const styles = StyleSheet.create({
   },
   materiaSelectorTextDark: {
     color: '#fff',
+  },
+  dateTimeSelector: {
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  dateTimeSelectorDark: {
+    backgroundColor: '#2d2d2d',
+  },
+  dateTimeLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 5,
+  },
+  dateTimeLabelDark: {
+    color: '#aaa',
+  },
+  dateTimeText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  dateTimeTextDark: {
+    color: '#fff',
+  },
+  dateTimePickerContainer: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  dateTimePicker: {
+    height: 200,
+    width: '100%',
   },
   observacionesInput: {
     backgroundColor: '#fff',
@@ -1072,6 +1216,13 @@ const styles = StyleSheet.create({
   },
   insumoOriginalCantidadDark: {
     color: '#aaa',
+  },
+  materiaSelectorDisabled: {
+    backgroundColor: '#f5f5f5',
+    opacity: 0.7,
+  },
+  materiaSelectorTextDisabled: {
+    color: '#666',
   },
 });
 

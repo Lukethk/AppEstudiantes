@@ -3,7 +3,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     ScrollView,
     StyleSheet,
     Text,
@@ -33,6 +32,7 @@ export default function SolicitudDetalleScreen() {
   const [solicitud, setSolicitud] = useState<Solicitud | null>(null);
   const [loading, setLoading] = useState(true);
   const { isDark } = useTheme();
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSolicitud();
@@ -43,10 +43,27 @@ export default function SolicitudDetalleScreen() {
       const response = await fetch(`https://universidad-la9h.onrender.com/estudiantes/solicitudes/${id}`);
       if (!response.ok) throw new Error('Error al cargar la solicitud');
       const data = await response.json();
-      setSolicitud(data);
+      
+      // Obtener los detalles de cada insumo
+      const insumosConDetalles = await Promise.all(
+        data.insumos.map(async (insumo: any) => {
+          const insumoResponse = await fetch(`https://universidad-la9h.onrender.com/insumos/${insumo.id_insumo}`);
+          const insumoData = await insumoResponse.json();
+          return {
+            ...insumo,
+            nombre: insumoData.nombre,
+            unidad_medida: insumoData.unidad_medida
+          };
+        })
+      );
+
+      setSolicitud({
+        ...data,
+        insumos: insumosConDetalles
+      });
     } catch (error) {
-      Alert.alert('Error', 'No se pudo cargar la solicitud');
-      router.back();
+      console.error('Error al cargar la solicitud:', error);
+      setError('No se pudo cargar la solicitud');
     } finally {
       setLoading(false);
     }
@@ -81,7 +98,7 @@ export default function SolicitudDetalleScreen() {
     return (
       <View style={[styles.container, styles.centerContent, isDark && styles.containerDark]}>
         <Text style={[styles.errorText, isDark && styles.errorTextDark]}>
-          No se encontró la solicitud
+          {error || 'No se encontró la solicitud'}
         </Text>
       </View>
     );
